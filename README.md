@@ -1,4 +1,4 @@
-# MyMind ($MIND)
+# Stop the War ($STW)
 
 bash /app/.agents/skills/webapp-building/scripts/init-webapp.sh "Canopy Network"
 Creating project: /mnt/agents/output/app
