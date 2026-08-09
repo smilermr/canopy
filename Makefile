@@ -10,9 +10,10 @@ DOCKER_DIR := ./.docker/compose.yaml
 .PHONY: help build/canopy build/canopy-full build/wallet build/explorer build/auto-update \
 	build/auto-update-local build/all test test/all test/race test/fuzz fmt vet check \
 	dev/deps docker/build docker/up docker/down docker/up-fast docker/logs \
-	build/plugin build/kotlin-plugin build/go-plugin build/typescript-plugin \
-	build/python-plugin build/csharp-plugin build/all-plugins docker/plugin \
-	docker/run docker/run-kotlin docker/run-go docker/run-typescript docker/run-python docker/run-csharp
+	run/auto-update run/auto-update-build build/plugin build/kotlin-plugin build/go-plugin \
+	build/typescript-plugin build/python-plugin build/csharp-plugin build/all-plugins \
+	docker/plugin docker/run docker/run-kotlin docker/run-go docker/run-typescript \
+	docker/run-python docker/run-csharp
 
 # ==================================================================================== #
 # HELPERS
@@ -70,7 +71,7 @@ vet:
 	go vet ./...
 
 ## test: run the complete Go test suite
- test:
+test:
 	go test ./... -p=1
 
 ## test/all: backwards-compatible alias for the complete test suite
@@ -81,7 +82,7 @@ test/race:
 	go test -race ./... -p=1
 
 ## test/fuzz: run the repository's supported fuzz targets
- test/fuzz:
+test/fuzz:
 	go test -fuzz=FuzzKeyDecodeEncode ./store -fuzztime=5s
 	go test -fuzz=FuzzBytesToBits ./store -fuzztime=5s
 
