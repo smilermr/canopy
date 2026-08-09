@@ -1,130 +1,153 @@
-# Variables
-GO_BIN_DIR := ~/go/bin
+# Canopy Network developer and release automation.
+
+GO_BIN_DIR ?= $(HOME)/go/bin
 CLI_DIR := ./cmd/main/...
 AUTO_UPDATE_DIR := ./cmd/auto-update/...
 WALLET_DIR := ./cmd/rpc/web/wallet
 EXPLORER_DIR := ./cmd/rpc/web/explorer
 DOCKER_DIR := ./.docker/compose.yaml
 
+.PHONY: help build/canopy build/canopy-full build/wallet build/explorer build/auto-update \
+	build/auto-update-local build/all test test/all test/race test/fuzz fmt vet check \
+	dev/deps docker/build docker/up docker/down docker/up-fast docker/logs \
+	build/plugin build/kotlin-plugin build/go-plugin build/typescript-plugin \
+	build/python-plugin build/csharp-plugin build/all-plugins docker/plugin \
+	docker/run docker/run-kotlin docker/run-go docker/run-typescript docker/run-python docker/run-csharp
+
 # ==================================================================================== #
 # HELPERS
 # ==================================================================================== #
 
-## help: print each command's help message
-.PHONY: help
+## help: print available commands
 help:
-	@echo 'Usage:'
-	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
-
-# Targets, this is a list of all available commands which can be executed using the make command.
-.PHONY: build/canopy build/canopy-full build/wallet build/explorer build/auto-update build/auto-update-local run/auto-update run/auto-update-build run/auto-update-test test/all dev/deps docker/up \
-	docker/down docker/build docker/up-fast docker/down docker/logs \
-	build/plugin build/kotlin-plugin build/go-plugin build/all-plugins docker/plugin \
-	docker/run docker/run-kotlin docker/run-go docker/run-typescript docker/run-python docker/run-csharp
+	@echo "Canopy Network developer commands:"
+	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'
 
 # ==================================================================================== #
 # BUILDING
 # ==================================================================================== #
 
-## build/canopy: build the canopy binary into the GO_BIN_DIR
+## build/canopy: build the production Canopy binary
 build/canopy:
-	npm install --prefix $(EXPLORER_DIR) && npm run build --prefix $(EXPLORER_DIR)
-	go build -o $(GO_BIN_DIR)/canopy $(CLI_DIR)
+	@mkdir -p $(GO_BIN_DIR)
+	npm ci --prefix $(EXPLORER_DIR)
+	npm run build --prefix $(EXPLORER_DIR)
+	go build -trimpath -o $(GO_BIN_DIR)/canopy $(CLI_DIR)
 
-## build/canopy-full: build the canopy binary and its wallet and explorer altogether
+## build/canopy-full: build Canopy together with wallet and explorer assets
 build/canopy-full: build/wallet build/explorer build/canopy
 
-## build/wallet: build the canopy's wallet project
+## build/wallet: build the wallet web application
 build/wallet:
-	npm install --prefix $(WALLET_DIR) && npm run build --prefix $(WALLET_DIR)
+	npm ci --prefix $(WALLET_DIR)
+	npm run build --prefix $(WALLET_DIR)
 
-## build/explorer: build the canopy's explorer project
+## build/explorer: build the explorer web application
 build/explorer:
-	npm install --prefix $(EXPLORER_DIR) && npm run build --prefix $(EXPLORER_DIR)
+	npm ci --prefix $(EXPLORER_DIR)
+	npm run build --prefix $(EXPLORER_DIR)
 
-## build/auto-update: build the canopy auto-update binary into the GO_BIN_DIR
+## build/auto-update: build the automatic update binary
 build/auto-update:
-	go build -o $(GO_BIN_DIR)/canopy-auto-update $(AUTO_UPDATE_DIR)
+	@mkdir -p $(GO_BIN_DIR)
+	go build -trimpath -o $(GO_BIN_DIR)/canopy-auto-update $(AUTO_UPDATE_DIR)
 
-## build/auto-update-local: build canopy CLI to ./cli and auto-update binary for local development
+## build/auto-update-local: build local CLI and auto-update binaries
 build/auto-update-local:
-	go build -o ./cli $(CLI_DIR)
-	go build -o $(GO_BIN_DIR)/canopy-auto-update $(AUTO_UPDATE_DIR)
-
-## run/auto-update: run the canopy auto-update binary with 'start' command (requires ./cli to exist)
-run/auto-update:
-	BIN_PATH=./cli go run $(AUTO_UPDATE_DIR) start
-
-## run/auto-update-build: build canopy CLI to ./cli and then run auto-update
-run/auto-update-build: build/auto-update-local
-	BIN_PATH=./cli go run $(AUTO_UPDATE_DIR) start
+	go build -trimpath -o ./cli $(CLI_DIR)
+	go build -trimpath -o $(GO_BIN_DIR)/canopy-auto-update $(AUTO_UPDATE_DIR)
 
 # ==================================================================================== #
-# TESTING
+# QUALITY / TESTING
 # ==================================================================================== #
 
-## test/all: run all canopy tests
-test/all:
+## fmt: format Go source files
+fmt:
+	gofmt -w $$(find . -type f -name '*.go' -not -path './vendor/*')
+
+## vet: run the Go static analyzer
+vet:
+	go vet ./...
+
+## test: run the complete Go test suite
+ test:
 	go test ./... -p=1
 
-## test/fuzz: run all canopy fuzz tests individually
-test/fuzz:
-	# Golang currently does not support multiple fuzz targets, so each need to be called individually
-	# For more information check the open issue: https://github.com/golang/go/issues/46312
+## test/all: backwards-compatible alias for the complete test suite
+test/all: test
+
+## test/race: run tests with the Go race detector
+test/race:
+	go test -race ./... -p=1
+
+## test/fuzz: run the repository's supported fuzz targets
+ test/fuzz:
 	go test -fuzz=FuzzKeyDecodeEncode ./store -fuzztime=5s
 	go test -fuzz=FuzzBytesToBits ./store -fuzztime=5s
+
+## check: run formatting, static analysis, and tests
+check: fmt vet test
 
 # ==================================================================================== #
 # DEVELOPMENT
 # ==================================================================================== #
 
-## dev/deps: install all dependencies on the project's directory
+## dev/deps: vendor Go dependencies for reproducible/offline development
 dev/deps:
 	go mod vendor
 
-# Detect OS to run the docker compose command, this is because Docker for MacOS does not support the
-# modern docker compose command and still uses the legacy docker-compose
 ifeq ($(shell uname -s),Darwin)
-    DOCKER_COMPOSE_CMD = docker-compose
+	DOCKER_COMPOSE_CMD = docker-compose
 else
-    DOCKER_COMPOSE_CMD = docker compose
+	DOCKER_COMPOSE_CMD = docker compose
 endif
 
-## docker/build: build the compose containers
+## docker/build: build Docker Compose services
 docker/build:
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) build
 
-## docker/up: build and start the compose containers in detached mode
+## docker/up: rebuild and start Docker Compose services
 docker/up:
-	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) down && \
+	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) down
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) up --build -d
 
-## docker/down: stop the compose containers
+## docker/down: stop Docker Compose services
 docker/down:
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) down
 
-## docker/up-fast: build and start the compose containers in detached mode without rebuilding
+## docker/up-fast: start existing Docker Compose images without rebuilding
 docker/up-fast:
-	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) down && \
+	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) down
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) up -d
 
-## docker/logs: show the latest logs of the compose containers
+## docker/logs: follow the latest Docker Compose logs
 docker/logs:
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_DIR) logs -f --tail=1000
+
+# ==================================================================================== #
+# AUTO UPDATE
+# ==================================================================================== #
+
+## run/auto-update: run the auto-update service using ./cli
+run/auto-update:
+	BIN_PATH=./cli go run $(AUTO_UPDATE_DIR) start
+
+## run/auto-update-build: build the local CLI and run auto-update
+run/auto-update-build: build/auto-update-local
+	BIN_PATH=./cli go run $(AUTO_UPDATE_DIR) start
 
 # ==================================================================================== #
 # PLUGINS
 # ==================================================================================== #
 
-# Plugin selection: make build/plugin PLUGIN=kotlin
 PLUGIN ?= kotlin
 
-## build/plugin: build a specific plugin (PLUGIN=kotlin|go|typescript|python|csharp|all)
+## build/plugin: build one plugin with PLUGIN=kotlin|go|typescript|python|csharp|all
 build/plugin:
 ifeq ($(PLUGIN),kotlin)
 	cd plugin/kotlin && ./gradlew fatJar --no-daemon
 else ifeq ($(PLUGIN),go)
-	cd plugin/go && go build -o go-plugin .
+	cd plugin/go && go build -trimpath -o go-plugin .
 else ifeq ($(PLUGIN),typescript)
 	cd plugin/typescript && npm ci && npm run build:all
 else ifeq ($(PLUGIN),python)
@@ -162,34 +185,36 @@ build/python-plugin:
 build/csharp-plugin:
 	$(MAKE) build/plugin PLUGIN=csharp
 
-## build/all-plugins: build all plugins
+## build/all-plugins: build all supported plugins
 build/all-plugins:
 	$(MAKE) build/plugin PLUGIN=all
 
-## docker/plugin: build Docker image with specific plugin (PLUGIN=kotlin|go|typescript|python|csharp)
+## docker/plugin: build a plugin Docker image
+# Usage: make docker/plugin PLUGIN=go
 docker/plugin:
 	docker build -f plugin/$(PLUGIN)/Dockerfile -t canopy-$(PLUGIN) .
 
-## docker/run: run Docker container with specific plugin (PLUGIN=kotlin|go|typescript|python|csharp)
+## docker/run: run the selected plugin container
+# Usage: make docker/run PLUGIN=go
 docker/run:
-	docker run -v ~/.canopy:/root/.canopy canopy-$(PLUGIN)
+	docker run --rm -v $(HOME)/.canopy:/root/.canopy canopy-$(PLUGIN)
 
-## docker/run-kotlin: run Kotlin plugin container
+## docker/run-kotlin: run the Kotlin plugin container
 docker/run-kotlin:
-	docker run -v ~/.canopy:/root/.canopy canopy-kotlin
+	$(MAKE) docker/run PLUGIN=kotlin
 
-## docker/run-go: run Go plugin container
+## docker/run-go: run the Go plugin container
 docker/run-go:
-	docker run -v ~/.canopy:/root/.canopy canopy-go
+	$(MAKE) docker/run PLUGIN=go
 
-## docker/run-typescript: run TypeScript plugin container
+## docker/run-typescript: run the TypeScript plugin container
 docker/run-typescript:
-	docker run -v ~/.canopy:/root/.canopy canopy-typescript
+	$(MAKE) docker/run PLUGIN=typescript
 
-## docker/run-python: run Python plugin container
+## docker/run-python: run the Python plugin container
 docker/run-python:
-	docker run -v ~/.canopy:/root/.canopy canopy-python
+	$(MAKE) docker/run PLUGIN=python
 
-## docker/run-csharp: run C# plugin container
+## docker/run-csharp: run the C# plugin container
 docker/run-csharp:
-	docker run -v ~/.canopy:/root/.canopy canopy-csharp
+	$(MAKE) docker/run PLUGIN=csharp
